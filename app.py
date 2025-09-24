@@ -18,9 +18,16 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # Change this in production
 
+
+# --- Absolute DB Paths ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+USERS_DB_PATH = os.path.join(BASE_DIR, 'users.db')
+HITS_DB_PATH = os.path.join(BASE_DIR, 'hits.db')
+
+
 # User Database setup
 def init_user_db():
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect(USERS_DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,9 +56,10 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+
 # Database setup
 def init_db():
-    conn = sqlite3.connect('hits.db')
+    conn = sqlite3.connect(HITS_DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS hits
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,15 +94,13 @@ def track_hits(f):
     def decorated_function(*args, **kwargs):
         ip = request.remote_addr
         location = get_location_info(ip)
-        
-        conn = sqlite3.connect('hits.db')
+        conn = sqlite3.connect(HITS_DB_PATH)
         c = conn.cursor()
         c.execute('''INSERT INTO hits (ip, timestamp, endpoint, country, city)
                     VALUES (?, datetime('now'), ?, ?, ?)''',
-                 (ip, request.endpoint, location['country'], location['city']))
+                  (ip, request.endpoint, location['country'], location['city']))
         conn.commit()
         conn.close()
-        
         return f(*args, **kwargs)
     return decorated_function
 
@@ -237,20 +243,17 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        
-        conn = sqlite3.connect('users.db')
+        conn = sqlite3.connect(USERS_DB_PATH)
         c = conn.cursor()
         c.execute('SELECT * FROM users WHERE username = ?', (username,))
         user = c.fetchone()
         conn.close()
-        
         if user and check_password_hash(user[2], password):
             session['user_id'] = user[0]
             session['username'] = user[1]
             flash('Successfully logged in!', 'success')
             next_page = request.args.get('next')
             return redirect(next_page if next_page else url_for('index'))
-        
         flash('Invalid username or password', 'danger')
     return render_template('login.html')
 
@@ -267,7 +270,7 @@ def register():
             return render_template('register.html')
         
         try:
-            conn = sqlite3.connect('users.db')
+            conn = sqlite3.connect(USERS_DB_PATH)
             c = conn.cursor()
             hashed_password = generate_password_hash(password)
             c.execute('INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
@@ -292,7 +295,7 @@ def logout():
 @app.route('/profile')
 @login_required
 def profile():
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect(USERS_DB_PATH)
     c = conn.cursor()
     c.execute('SELECT username, email, created_at FROM users WHERE id = ?', (session['user_id'],))
     user = c.fetchone()
@@ -303,7 +306,7 @@ def profile():
 @login_required
 def delete_account():
     if request.form.get('confirm_delete') == 'yes':
-        conn = sqlite3.connect('users.db')
+        conn = sqlite3.connect(USERS_DB_PATH)
         c = conn.cursor()
         c.execute('DELETE FROM users WHERE id = ?', (session['user_id'],))
         conn.commit()
@@ -318,33 +321,28 @@ def delete_account():
 def reset_password_request():
     if request.method == 'POST':
         email = request.form.get('email')
-        conn = sqlite3.connect('users.db')
+        conn = sqlite3.connect(USERS_DB_PATH)
         c = conn.cursor()
         c.execute('SELECT id FROM users WHERE email = ?', (email,))
         user = c.fetchone()
-        
         if user:
             token = generate_reset_token()
             expiry = datetime.now() + timedelta(hours=1)
             c.execute('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
-                     (token, expiry, email))
+                      (token, expiry, email))
             conn.commit()
-            
             # Here you would typically send an email with the reset link
             # For demonstration, we'll just flash the token
             flash(f'Password reset link: {url_for("reset_password", token=token, _external=True)}', 'info')
-            
         else:
             flash('If an account exists with that email, a password reset link will be sent.', 'info')
-        
         conn.close()
         return redirect(url_for('login'))
-    
     return render_template('reset_password_request.html')
 
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect(USERS_DB_PATH)
     c = conn.cursor()
     c.execute('''SELECT id FROM users 
                  WHERE reset_token = ? AND reset_token_expiry > ?''',
@@ -379,7 +377,7 @@ def update_profile():
     current_password = request.form.get('current_password')
     new_password = request.form.get('new_password')
     
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect(USERS_DB_PATH)
     c = conn.cursor()
     
     try:
@@ -415,7 +413,7 @@ def update_profile():
 @login_required
 @track_hits
 def stats():
-    conn = sqlite3.connect('hits.db')
+    conn = sqlite3.connect(HITS_DB_PATH)
     c = conn.cursor()
     
     # Get total hits
