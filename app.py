@@ -9,7 +9,7 @@ from openpyxl.styles import Font, PatternFill
 import io
 import zipfile
 from datetime import datetime, timedelta
-import sqlite3
+import mysql.connector
 import requests
 import secrets
 from functools import wraps
@@ -19,25 +19,31 @@ app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # Change this in production
 
 
-# --- Absolute DB Paths ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-USERS_DB_PATH = os.path.join(BASE_DIR, 'users.db')
-HITS_DB_PATH = os.path.join(BASE_DIR, 'hits.db')
+
+# --- MySQL DB Config ---
+MYSQL_CONFIG = {
+    'user': 'root',
+    'password': '',
+    'host': 'localhost',
+    'database': 'flask_db',
+    'autocommit': True
+}
 
 
 # User Database setup
 def init_user_db():
-    conn = sqlite3.connect(USERS_DB_PATH)
+    conn = mysql.connector.connect(**MYSQL_CONFIG)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  username TEXT UNIQUE NOT NULL,
-                  password TEXT NOT NULL,
-                  email TEXT UNIQUE NOT NULL,
-                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                  reset_token TEXT,
-                  reset_token_expiry DATETIME)''')
-    conn.commit()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reset_token VARCHAR(255),
+        reset_token_expiry DATETIME
+    )''')
+    c.close()
     conn.close()
 
 # Initialize user database
@@ -59,16 +65,17 @@ def login_required(f):
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect(HITS_DB_PATH)
+    conn = mysql.connector.connect(**MYSQL_CONFIG)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS hits
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  ip TEXT,
-                  timestamp DATETIME,
-                  endpoint TEXT,
-                  country TEXT,
-                  city TEXT)''')
-    conn.commit()
+    c.execute('''CREATE TABLE IF NOT EXISTS hits (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ip VARCHAR(64),
+        timestamp DATETIME,
+        endpoint VARCHAR(255),
+        country VARCHAR(255),
+        city VARCHAR(255)
+    )''')
+    c.close()
     conn.close()
 
 # Initialize database
@@ -94,12 +101,12 @@ def track_hits(f):
     def decorated_function(*args, **kwargs):
         ip = request.remote_addr
         location = get_location_info(ip)
-        conn = sqlite3.connect(HITS_DB_PATH)
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
         c = conn.cursor()
         c.execute('''INSERT INTO hits (ip, timestamp, endpoint, country, city)
-                    VALUES (?, datetime('now'), ?, ?, ?)''',
-                  (ip, request.endpoint, location['country'], location['city']))
-        conn.commit()
+                                         VALUES (%s, NOW(), %s, %s, %s)''',
+                                    (ip, request.endpoint, location['country'], location['city']))
+        c.close()
         conn.close()
         return f(*args, **kwargs)
     return decorated_function
@@ -243,10 +250,11 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        conn = sqlite3.connect(USERS_DB_PATH)
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
         c = conn.cursor()
-        c.execute('SELECT * FROM users WHERE username = ?', (username,))
+        c.execute('SELECT * FROM users WHERE username = %s', (username,))
         user = c.fetchone()
+        c.close()
         conn.close()
         if user and check_password_hash(user[2], password):
             session['user_id'] = user[0]
@@ -264,41 +272,33 @@ def register():
         username = request.form.get('username')
         password = request.form.get('password')
         email = request.form.get('email')
-        
         if not all([username, password, email]):
             flash('All fields are required', 'danger')
             return render_template('register.html')
-        
         try:
-            conn = sqlite3.connect(USERS_DB_PATH)
+            conn = mysql.connector.connect(**MYSQL_CONFIG)
             c = conn.cursor()
             hashed_password = generate_password_hash(password)
-            c.execute('INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
-                     (username, hashed_password, email))
-            conn.commit()
+            c.execute('INSERT INTO users (username, password, email) VALUES (%s, %s, %s)',
+                      (username, hashed_password, email))
+            c.close()
             conn.close()
-            
             flash('Registration successful! Please log in.', 'success')
             return redirect(url_for('login'))
-        except sqlite3.IntegrityError:
+        except mysql.connector.IntegrityError:
             flash('Username or email already exists', 'danger')
             return render_template('register.html')
-    
     return render_template('register.html')
 
-@app.route('/logout')
-def logout():
-    session.clear()
-    flash('You have been logged out', 'info')
-    return redirect(url_for('home'))
-
+# Add missing /profile route
 @app.route('/profile')
 @login_required
 def profile():
-    conn = sqlite3.connect(USERS_DB_PATH)
+    conn = mysql.connector.connect(**MYSQL_CONFIG)
     c = conn.cursor()
-    c.execute('SELECT username, email, created_at FROM users WHERE id = ?', (session['user_id'],))
+    c.execute('SELECT username, email, created_at FROM users WHERE id = %s', (session['user_id'],))
     user = c.fetchone()
+    c.close()
     conn.close()
     return render_template('profile.html', user=user)
 
@@ -306,10 +306,10 @@ def profile():
 @login_required
 def delete_account():
     if request.form.get('confirm_delete') == 'yes':
-        conn = sqlite3.connect(USERS_DB_PATH)
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
         c = conn.cursor()
-        c.execute('DELETE FROM users WHERE id = ?', (session['user_id'],))
-        conn.commit()
+        c.execute('DELETE FROM users WHERE id = %s', (session['user_id'],))
+        c.close()
         conn.close()
         session.clear()
         flash('Your account has been permanently deleted.', 'success')
@@ -321,51 +321,51 @@ def delete_account():
 def reset_password_request():
     if request.method == 'POST':
         email = request.form.get('email')
-        conn = sqlite3.connect(USERS_DB_PATH)
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
         c = conn.cursor()
-        c.execute('SELECT id FROM users WHERE email = ?', (email,))
+        c.execute('SELECT id FROM users WHERE email = %s', (email,))
         user = c.fetchone()
         if user:
             token = generate_reset_token()
             expiry = datetime.now() + timedelta(hours=1)
-            c.execute('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
+            c.execute('UPDATE users SET reset_token = %s, reset_token_expiry = %s WHERE email = %s',
                       (token, expiry, email))
-            conn.commit()
             # Here you would typically send an email with the reset link
             # For demonstration, we'll just flash the token
-            flash(f'Password reset link: {url_for("reset_password", token=token, _external=True)}', 'info')
+            flash('Password reset link: {url_for(\"reset_password\", token=token, _external=True)}', 'info')
         else:
             flash('If an account exists with that email, a password reset link will be sent.', 'info')
+        c.close()
         conn.close()
         return redirect(url_for('login'))
     return render_template('reset_password_request.html')
 
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
-    conn = sqlite3.connect(USERS_DB_PATH)
+    conn = mysql.connector.connect(**MYSQL_CONFIG)
     c = conn.cursor()
     c.execute('''SELECT id FROM users 
-                 WHERE reset_token = ? AND reset_token_expiry > ?''',
+                 WHERE reset_token = %s AND reset_token_expiry > %s''',
               (token, datetime.now()))
     user = c.fetchone()
-    
     if not user:
+        c.close()
         conn.close()
         flash('Invalid or expired reset token.', 'danger')
         return redirect(url_for('reset_password_request'))
-    
     if request.method == 'POST':
         password = request.form.get('password')
         if password:
             hashed_password = generate_password_hash(password)
             c.execute('''UPDATE users 
-                        SET password = ?, reset_token = NULL, reset_token_expiry = NULL 
-                        WHERE reset_token = ?''',
+                        SET password = %s, reset_token = NULL, reset_token_expiry = NULL 
+                        WHERE reset_token = %s''',
                      (hashed_password, token))
-            conn.commit()
             flash('Your password has been reset.', 'success')
+            c.close()
+            conn.close()
             return redirect(url_for('login'))
-    
+    c.close()
     conn.close()
     return render_template('reset_password.html')
 
@@ -376,50 +376,43 @@ def update_profile():
     email = request.form.get('email')
     current_password = request.form.get('current_password')
     new_password = request.form.get('new_password')
-    
-    conn = sqlite3.connect(USERS_DB_PATH)
-    c = conn.cursor()
-    
     try:
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        c = conn.cursor()
         if current_password:
             # Verify current password
-            c.execute('SELECT password FROM users WHERE id = ?', (session['user_id'],))
+            c.execute('SELECT password FROM users WHERE id = %s', (session['user_id'],))
             stored_password = c.fetchone()[0]
             if not check_password_hash(stored_password, current_password):
                 flash('Current password is incorrect.', 'danger')
+                c.close()
+                conn.close()
                 return redirect(url_for('profile'))
-            
             if new_password:
                 hashed_password = generate_password_hash(new_password)
-                c.execute('UPDATE users SET password = ? WHERE id = ?',
+                c.execute('UPDATE users SET password = %s WHERE id = %s',
                          (hashed_password, session['user_id']))
-        
         if username or email:
-            c.execute('UPDATE users SET username = ?, email = ? WHERE id = ?',
+            c.execute('UPDATE users SET username = %s, email = %s WHERE id = %s',
                      (username, email, session['user_id']))
             session['username'] = username
-        
         conn.commit()
         flash('Profile updated successfully.', 'success')
-        
-    except sqlite3.IntegrityError:
-        flash('Username or email already exists.', 'danger')
-    finally:
+        c.close()
         conn.close()
-    
+    except mysql.connector.IntegrityError:
+        flash('Username or email already exists.', 'danger')
     return redirect(url_for('profile'))
 
 @app.route('/stats')
 @login_required
 @track_hits
 def stats():
-    conn = sqlite3.connect(HITS_DB_PATH)
+    conn = mysql.connector.connect(**MYSQL_CONFIG)
     c = conn.cursor()
-    
     # Get total hits
     c.execute('SELECT COUNT(*) FROM hits')
     total_hits = c.fetchone()[0]
-    
     # Get hits by country
     c.execute('''SELECT country, COUNT(*) as count 
                  FROM hits 
@@ -427,23 +420,20 @@ def stats():
                  ORDER BY count DESC 
                  LIMIT 10''')
     countries = c.fetchall()
-    
     # Get hits by endpoint
     c.execute('''SELECT endpoint, COUNT(*) as count 
                  FROM hits 
                  GROUP BY endpoint 
                  ORDER BY count DESC''')
     endpoints = c.fetchall()
-    
     # Get recent hits
     c.execute('''SELECT ip, country, city, timestamp, endpoint 
                  FROM hits 
                  ORDER BY timestamp DESC 
                  LIMIT 10''')
     recent_hits = c.fetchall()
-    
+    c.close()
     conn.close()
-    
     return render_template('stats.html', 
                          total_hits=total_hits,
                          countries=countries,
