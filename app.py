@@ -88,8 +88,8 @@ def get_location_info(ip):
         if response.status_code == 200:
             data = response.json()
             return {
-                'country': data.get('country_name', 'Unknown'),
-                'city': data.get('city', 'Unknown')
+                'country': data.get('country_name') or 'Unknown',
+                'city': data.get('city') or 'Unknown'
             }
     except Exception as e:
         print(f"Error getting location: {e}")
@@ -289,6 +289,13 @@ def register():
             flash('Username or email already exists', 'danger')
             return render_template('register.html')
     return render_template('register.html')
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You have been logged out', 'info')
+    return redirect(url_for('home'))
 
 # Add missing /profile route
 @app.route('/profile')
