@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Usage Statistics</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>Usage Statistics</h1>
+        <a href="/index" class="btn btn-primary mb-4">Back to Home</a>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Total Hits</h5>
+                        <h2 class="card-text">{{ total_hits }}</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <h3>Top Countries</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Country</th>
+                            <th>Hits</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for country, count in countries %}
+                        <tr>
+                            <td>{{ country }}</td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="col-md-6">
+                <h3>Endpoints Usage</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Hits</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for endpoint, count in endpoints %}
+                        <tr>
+                            <td>{{ endpoint }}</td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <h3>Recent Activity</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>IP Address</th>
+                            <th>Location</th>
+                            <th>Endpoint</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ip, country, city, timestamp, endpoint in recent_hits %}
+                        <tr>
+                            <td>{{ timestamp }}</td>
+                            <td>{{ ip }}</td>
+                            <td>{{ city }}, {{ country }}</td>
+                            <td>{{ endpoint }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

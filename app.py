@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for, jsonify
+from flask import Flask, render_template, request, send_file, flash, redirect, url_for, jsonify, session
 import os
 import re
 import tempfile
@@ -8,10 +8,95 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 import io
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
+import sqlite3
+import requests
+import secrets
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # Change this in production
+
+# User Database setup
+def init_user_db():
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT UNIQUE NOT NULL,
+                  password TEXT NOT NULL,
+                  email TEXT UNIQUE NOT NULL,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  reset_token TEXT,
+                  reset_token_expiry DATETIME)''')
+    conn.commit()
+    conn.close()
+
+# Initialize user database
+init_user_db()
+
+def generate_reset_token():
+    return secrets.token_urlsafe(32)
+
+# Login required decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please log in to access this page', 'warning')
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Database setup
+def init_db():
+    conn = sqlite3.connect('hits.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS hits
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ip TEXT,
+                  timestamp DATETIME,
+                  endpoint TEXT,
+                  country TEXT,
+                  city TEXT)''')
+    conn.commit()
+    conn.close()
+
+# Initialize database
+init_db()
+
+# IP Geolocation function
+def get_location_info(ip):
+    try:
+        response = requests.get(f'https://ipapi.co/{ip}/json/')
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'country': data.get('country_name', 'Unknown'),
+                'city': data.get('city', 'Unknown')
+            }
+    except Exception as e:
+        print(f"Error getting location: {e}")
+    return {'country': 'Unknown', 'city': 'Unknown'}
+
+# Hit counter decorator
+def track_hits(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        ip = request.remote_addr
+        location = get_location_info(ip)
+        
+        conn = sqlite3.connect('hits.db')
+        c = conn.cursor()
+        c.execute('''INSERT INTO hits (ip, timestamp, endpoint, country, city)
+                    VALUES (?, datetime('now'), ?, ?, ?)''',
+                 (ip, request.endpoint, location['country'], location['city']))
+        conn.commit()
+        conn.close()
+        
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -128,11 +213,247 @@ def create_zip_file(file_data):
     temp_zip.close()
     return temp_zip.name
 
+
+# Redirect root to /home
 @app.route('/')
+def root():
+    return redirect(url_for('home'))
+
+
+@app.route('/index')
+@login_required
+@track_hits
 def index():
     return render_template('index.html')
 
+@app.route('/home')
+@track_hits
+def home():
+    return render_template('home.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+@track_hits
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        c.execute('SELECT * FROM users WHERE username = ?', (username,))
+        user = c.fetchone()
+        conn.close()
+        
+        if user and check_password_hash(user[2], password):
+            session['user_id'] = user[0]
+            session['username'] = user[1]
+            flash('Successfully logged in!', 'success')
+            next_page = request.args.get('next')
+            return redirect(next_page if next_page else url_for('index'))
+        
+        flash('Invalid username or password', 'danger')
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+@track_hits
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        email = request.form.get('email')
+        
+        if not all([username, password, email]):
+            flash('All fields are required', 'danger')
+            return render_template('register.html')
+        
+        try:
+            conn = sqlite3.connect('users.db')
+            c = conn.cursor()
+            hashed_password = generate_password_hash(password)
+            c.execute('INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
+                     (username, hashed_password, email))
+            conn.commit()
+            conn.close()
+            
+            flash('Registration successful! Please log in.', 'success')
+            return redirect(url_for('login'))
+        except sqlite3.IntegrityError:
+            flash('Username or email already exists', 'danger')
+            return render_template('register.html')
+    
+    return render_template('register.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You have been logged out', 'info')
+    return redirect(url_for('home'))
+
+@app.route('/profile')
+@login_required
+def profile():
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('SELECT username, email, created_at FROM users WHERE id = ?', (session['user_id'],))
+    user = c.fetchone()
+    conn.close()
+    return render_template('profile.html', user=user)
+
+@app.route('/profile/delete', methods=['POST'])
+@login_required
+def delete_account():
+    if request.form.get('confirm_delete') == 'yes':
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        c.execute('DELETE FROM users WHERE id = ?', (session['user_id'],))
+        conn.commit()
+        conn.close()
+        session.clear()
+        flash('Your account has been permanently deleted.', 'success')
+        return redirect(url_for('home'))
+    flash('Account deletion requires confirmation.', 'danger')
+    return redirect(url_for('profile'))
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password_request():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        c.execute('SELECT id FROM users WHERE email = ?', (email,))
+        user = c.fetchone()
+        
+        if user:
+            token = generate_reset_token()
+            expiry = datetime.now() + timedelta(hours=1)
+            c.execute('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
+                     (token, expiry, email))
+            conn.commit()
+            
+            # Here you would typically send an email with the reset link
+            # For demonstration, we'll just flash the token
+            flash(f'Password reset link: {url_for("reset_password", token=token, _external=True)}', 'info')
+            
+        else:
+            flash('If an account exists with that email, a password reset link will be sent.', 'info')
+        
+        conn.close()
+        return redirect(url_for('login'))
+    
+    return render_template('reset_password_request.html')
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('''SELECT id FROM users 
+                 WHERE reset_token = ? AND reset_token_expiry > ?''',
+              (token, datetime.now()))
+    user = c.fetchone()
+    
+    if not user:
+        conn.close()
+        flash('Invalid or expired reset token.', 'danger')
+        return redirect(url_for('reset_password_request'))
+    
+    if request.method == 'POST':
+        password = request.form.get('password')
+        if password:
+            hashed_password = generate_password_hash(password)
+            c.execute('''UPDATE users 
+                        SET password = ?, reset_token = NULL, reset_token_expiry = NULL 
+                        WHERE reset_token = ?''',
+                     (hashed_password, token))
+            conn.commit()
+            flash('Your password has been reset.', 'success')
+            return redirect(url_for('login'))
+    
+    conn.close()
+    return render_template('reset_password.html')
+
+@app.route('/profile/update', methods=['POST'])
+@login_required
+def update_profile():
+    username = request.form.get('username')
+    email = request.form.get('email')
+    current_password = request.form.get('current_password')
+    new_password = request.form.get('new_password')
+    
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    
+    try:
+        if current_password:
+            # Verify current password
+            c.execute('SELECT password FROM users WHERE id = ?', (session['user_id'],))
+            stored_password = c.fetchone()[0]
+            if not check_password_hash(stored_password, current_password):
+                flash('Current password is incorrect.', 'danger')
+                return redirect(url_for('profile'))
+            
+            if new_password:
+                hashed_password = generate_password_hash(new_password)
+                c.execute('UPDATE users SET password = ? WHERE id = ?',
+                         (hashed_password, session['user_id']))
+        
+        if username or email:
+            c.execute('UPDATE users SET username = ?, email = ? WHERE id = ?',
+                     (username, email, session['user_id']))
+            session['username'] = username
+        
+        conn.commit()
+        flash('Profile updated successfully.', 'success')
+        
+    except sqlite3.IntegrityError:
+        flash('Username or email already exists.', 'danger')
+    finally:
+        conn.close()
+    
+    return redirect(url_for('profile'))
+
+@app.route('/stats')
+@login_required
+@track_hits
+def stats():
+    conn = sqlite3.connect('hits.db')
+    c = conn.cursor()
+    
+    # Get total hits
+    c.execute('SELECT COUNT(*) FROM hits')
+    total_hits = c.fetchone()[0]
+    
+    # Get hits by country
+    c.execute('''SELECT country, COUNT(*) as count 
+                 FROM hits 
+                 GROUP BY country 
+                 ORDER BY count DESC 
+                 LIMIT 10''')
+    countries = c.fetchall()
+    
+    # Get hits by endpoint
+    c.execute('''SELECT endpoint, COUNT(*) as count 
+                 FROM hits 
+                 GROUP BY endpoint 
+                 ORDER BY count DESC''')
+    endpoints = c.fetchall()
+    
+    # Get recent hits
+    c.execute('''SELECT ip, country, city, timestamp, endpoint 
+                 FROM hits 
+                 ORDER BY timestamp DESC 
+                 LIMIT 10''')
+    recent_hits = c.fetchall()
+    
+    conn.close()
+    
+    return render_template('stats.html', 
+                         total_hits=total_hits,
+                         countries=countries,
+                         endpoints=endpoints,
+                         recent_hits=recent_hits)
+
 @app.route('/upload', methods=['POST'])
+@track_hits
 def upload_files():
     if 'files' not in request.files:
         return jsonify({'error': 'No files selected'}), 400
