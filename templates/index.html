@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Email Extractor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .container {
+            padding-top: 50px;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 20px 20px 0 0 !important;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .card-body {
+            padding: 40px;
+        }
+        
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: #f8f9ff;
+        }
+        
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+            transform: translateY(-2px);
+        }
+        
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8f0ff;
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            font-size: 4rem;
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .file-list {
+            background: #e8f0ff;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        
+        .file-item {
+            background: white;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .file-item .file-details {
+            display: flex;
+            align-items: center;
+        }
+        
+        .file-item .file-remove {
+            color: #dc3545;
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+        
+        .file-item .file-remove:hover {
+            background: #f8d7da;
+            transform: scale(1.1);
+        }
+        
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .feature-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+        
+        .feature-list i {
+            color: #667eea;
+            margin-right: 10px;
+            width: 20px;
+        }
+        
+        .alert {
+            border-radius: 10px;
+            border: none;
+        }
+        
+        .loading {
+            display: none;
+        }
+        
+        .spinner-border {
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8 col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h1><i class="fas fa-file-pdf me-3"></i>PDF Email Extractor</h1>
+                        <p class="mb-0">Upload a PDF file to extract email addresses and download as Excel</p>
+                    </div>
+                    <div class="card-body">
+                        {% with messages = get_flashed_messages() %}
+                            {% if messages %}
+                                {% for message in messages %}
+                                    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                                        <i class="fas fa-exclamation-triangle me-2"></i>{{ message }}
+                                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endwith %}
+                        
+                        <form action="/upload" method="post" enctype="multipart/form-data" id="uploadForm">
+                            <div class="upload-area" id="uploadArea">
+                                <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                                <h4>Drag & Drop PDF Files Here</h4>
+                                <p class="text-muted">or click to browse files (multiple files supported)</p>
+                                <input type="file" name="files" id="fileInput" accept=".pdf" multiple style="display: none;" required>
+                                <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-folder-open me-2"></i>Choose Files
+                                </button>
+                            </div>
+                            
+                            <div class="file-list" id="fileList" style="display: none;">
+                                <h6><i class="fas fa-files me-2"></i>Selected Files:</h6>
+                                <div id="fileItems"></div>
+                            </div>
+                            
+                            <div class="text-center mt-4">
+                                <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+                                    <i class="fas fa-magic me-2"></i>Extract
+                                </button>
+                                
+                                <div class="loading mt-3" id="loading">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Processing...</span>
+                                    </div>
+                                    <p class="mt-2">Processing your PDF file...</p>
+                                </div>
+                            </div>
+                        </form>
+                        
+                        <hr class="my-4">
+                        
+                        <h5><i class="fas fa-info-circle me-2"></i>Features</h5>
+                        <ul class="feature-list">
+                            <li><i class="fas fa-check"></i>Extract all email addresses from PDF files</li>
+                            <li><i class="fas fa-check"></i>Multiple file upload support</li>
+                            <li><i class="fas fa-check"></i>Export results to Excel format (.xlsx)</li>
+                            <li><i class="fas fa-check"></i>ZIP download for multiple files</li>
+                            <li><i class="fas fa-check"></i>Organized output with email domains</li>
+                            <li><i class="fas fa-check"></i>Drag & drop file upload</li>
+                            <li><i class="fas fa-check"></i>Automatic file cleanup</li>
+                            <li><i class="fas fa-check"></i>Secure file processing</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const fileItems = document.getElementById('fileItems');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const uploadForm = document.getElementById('uploadForm');
+        
+        let selectedFiles = [];
+
+        // Drag and drop functionality
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            handleFiles(files);
+        });
+
+        // Click to upload
+        uploadArea.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'BUTTON') {
+                fileInput.click();
+            }
+        });
+
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            handleFiles(files);
+        });
+
+        function handleFiles(files) {
+            // Filter only PDF files
+            const pdfFiles = files.filter(file => file.type === 'application/pdf');
+            
+            if (pdfFiles.length === 0) {
+                alert('Please select PDF files only.');
+                return;
+            }
+            
+            // Add new files to selected files
+            pdfFiles.forEach(file => {
+                if (!selectedFiles.find(f => f.name === file.name && f.size === file.size)) {
+                    selectedFiles.push(file);
+                }
+            });
+            
+            updateFileList();
+        }
+
+        function updateFileList() {
+            if (selectedFiles.length === 0) {
+                fileList.style.display = 'none';
+                submitBtn.disabled = true;
+                return;
+            }
+            
+            fileList.style.display = 'block';
+            submitBtn.disabled = false;
+            
+            fileItems.innerHTML = '';
+            selectedFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.innerHTML = `
+                    <div class="file-details">
+                        <i class="fas fa-file-pdf text-danger me-2"></i>
+                        <span>${file.name}</span>
+                        <span class="text-muted ms-2">(${formatFileSize(file.size)})</span>
+                    </div>
+                    <i class="fas fa-times file-remove" onclick="removeFile(${index})"></i>
+                `;
+                fileItems.appendChild(fileItem);
+            });
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileList();
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Form submission
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (selectedFiles.length === 0) {
+                alert('Please select at least one PDF file.');
+                return;
+            }
+            
+            // Create FormData with selected files
+            const formData = new FormData();
+            selectedFiles.forEach(file => {
+                formData.append('files', file);
+            });
+            
+            submitBtn.style.display = 'none';
+            loading.style.display = 'block';
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    // Get filename from response headers
+                    const contentDisposition = response.headers.get('Content-Disposition');
+                    let filename = 'extracted_emails';
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                        if (filenameMatch) {
+                            filename = filenameMatch[1];
+                        }
+                    }
+                    
+                    // Create blob and download
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    // Reset form
+                    selectedFiles = [];
+                    fileInput.value = '';
+                    updateFileList();
+                    
+                } else {
+                    const errorData = await response.json();
+                    alert('Error: ' + errorData.error);
+                }
+            } catch (error) {
+                alert('Error uploading files: ' + error.message);
+            } finally {
+                submitBtn.style.display = 'block';
+                loading.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
