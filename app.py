@@ -23,13 +23,7 @@ app.secret_key = 'your-secret-key-here'  # Change this in production
 # Authentication removed: user database, tokens, and login protections are no longer used.
 
 
-# Database setup
-def init_db():
-    # No-op: stats/hits tracking removed
-    return
-
-# Initialize database
-init_db()
+# Database setup removed
 
 # IP Geolocation removed
 
@@ -194,35 +188,7 @@ def create_zip_file(file_data):
 # Redirect root to /home
 @app.route('/')
 def root():
-    return render_template('index.html')
-
-
-# @app.route('/')
-# #@login_required
-# @track_hits
-# def index():
-#     return render_template('index.html')
-
-@app.route('/home')
-def home():
-    return render_template('home.html')
-
-# Auth routes removed
-
- 
-
-
- 
-
- 
-
- 
-
- 
-
- 
-
- 
+     return render_template('index.html')
 
 # Stats page removed
 
