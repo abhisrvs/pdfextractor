@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for, jsonify, session
+from flask import Flask, render_template, request, send_file, flash, redirect, url_for, jsonify
 import os
 import re
 import tempfile
@@ -9,107 +9,32 @@ from openpyxl.styles import Font, PatternFill
 import io
 import zipfile
 from datetime import datetime, timedelta
-import mysql.connector
-import requests
-import secrets
-from functools import wraps
-from werkzeug.security import generate_password_hash, check_password_hash
+ 
+ 
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # Change this in production
 
 
 
-# --- MySQL DB Config ---
-MYSQL_CONFIG = {
-    'user': 'root',
-    'password': '',
-    'host': 'localhost',
-    'database': 'flask_db',
-    'autocommit': True
-}
+# Database removed: no MySQL configuration required
 
 
-# User Database setup
-def init_user_db():
-    conn = mysql.connector.connect(**MYSQL_CONFIG)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(255) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        reset_token VARCHAR(255),
-        reset_token_expiry DATETIME
-    )''')
-    c.close()
-    conn.close()
-
-# Initialize user database
-init_user_db()
-
-def generate_reset_token():
-    return secrets.token_urlsafe(32)
-
-# Login required decorator
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Please log in to access this page', 'warning')
-            return redirect(url_for('login', next=request.url))
-        return f(*args, **kwargs)
-    return decorated_function
+# Authentication removed: user database, tokens, and login protections are no longer used.
 
 
 # Database setup
 def init_db():
-    conn = mysql.connector.connect(**MYSQL_CONFIG)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS hits (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        ip VARCHAR(64),
-        timestamp DATETIME,
-        endpoint VARCHAR(255),
-        country VARCHAR(255),
-        city VARCHAR(255)
-    )''')
-    c.close()
-    conn.close()
+    # No-op: stats/hits tracking removed
+    return
 
 # Initialize database
 init_db()
 
-# IP Geolocation function
-def get_location_info(ip):
-    try:
-        response = requests.get(f'https://ipapi.co/{ip}/json/')
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                'country': data.get('country_name') or 'Unknown',
-                'city': data.get('city') or 'Unknown'
-            }
-    except Exception as e:
-        print(f"Error getting location: {e}")
-    return {'country': 'Unknown', 'city': 'Unknown'}
+# IP Geolocation removed
 
 # Hit counter decorator
-def track_hits(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        ip = request.remote_addr
-        location = get_location_info(ip)
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        c = conn.cursor()
-        c.execute('''INSERT INTO hits (ip, timestamp, endpoint, country, city)
-                                         VALUES (%s, NOW(), %s, %s, %s)''',
-                                    (ip, request.endpoint, location['country'], location['city']))
-        c.close()
-        conn.close()
-        return f(*args, **kwargs)
-    return decorated_function
+# Hit tracking removed
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -142,26 +67,56 @@ def extract_emails_from_pdf(pdf_path):
                         start_pos = max(0, email_pos - 200)
                         end_pos = min(len(text), email_pos + 200)
                         context = text[start_pos:end_pos].lower()
-                        
                         # Employment type keywords
                         contract_keywords = ['contract', 'contractor', 'temporary', 'temp', 'fixed term']
                         permanent_keywords = ['permanent', 'full-time', 'full time', 'perm']
                         remote_keywords = ['remote', 'work from home', 'wfh', 'virtual', 'telecommute', 'home-based']
-                        
+
                         # Determine employment type
                         employment_type = 'Unknown'
                         if any(keyword in context for keyword in contract_keywords):
                             employment_type = 'Contract'
                         elif any(keyword in context for keyword in permanent_keywords):
                             employment_type = 'Permanent'
-                            
+
                         # Determine if remote
                         work_location = 'On-site'
                         if any(keyword in context for keyword in remote_keywords):
                             work_location = 'Remote'
-                        
+
+                        # Experience extraction (years + seniority)
+                        experience_years = ''
+                        seniority = ''
+                        # look for patterns like '5 years', '5+ years', '3 yrs', etc.
+                        years_match = re.search(r"(\d{1,2}(?:\.\d+)?)(\+)?\s*(?:years?|yrs?)", context)
+                        if years_match:
+                            experience_years = years_match.group(1) + ("+" if years_match.group(2) else "") + ' years'
+                        # seniority keywords
+                        if 'senior' in context:
+                            seniority = 'Senior'
+                        elif 'lead' in context or 'leading' in context:
+                            seniority = 'Lead'
+                        elif 'manager' in context or 'management' in context:
+                            seniority = 'Manager'
+                        elif 'junior' in context or 'jr.' in context:
+                            seniority = 'Junior'
+
+                        # Skills extraction using keyword matching
+                        skills_keywords = [
+                            'python', 'java', 'c++', 'c#', 'javascript', 'react', 'node', 'django', 'flask',
+                            'sql', 'mysql', 'postgres', 'mongodb', 'aws', 'azure', 'gcp', 'docker', 'kubernetes',
+                            'html', 'css', 'git', 'linux', 'excel', 'pandas', 'numpy', 'scikit-learn', 'sklearn',
+                            'tensorflow', 'pytorch', 'machine learning', 'data analysis', 'nlp', 'spark', 'hadoop',
+                            'communication', 'leadership', 'project management'
+                        ]
+                        found_skills = set()
+                        for kw in skills_keywords:
+                            if kw in context:
+                                found_skills.add(kw)
+                        skills_str = ', '.join(sorted(found_skills))
+
                         if email not in [e[0] for e in email_data]:
-                            email_data.append((email, employment_type, work_location))
+                            email_data.append((email, employment_type, work_location, experience_years, seniority, skills_str))
     except Exception as e:
         print(f"Error extracting emails and job types: {e}")
         return []
@@ -175,21 +130,30 @@ def create_excel_file(email_data, filename="Extracted Emails"):
     ws.title = filename
     
     # Add headers
-    headers = ["Email Address", "Domain", "Employment Type", "Work Location", "Status"]
+    headers = ["Email Address", "Domain", "Employment Type", "Work Location", "Experience", "Seniority", "Skills", "Status"]
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
     
     # Add email data
-    for row, (email, employment_type, work_location) in enumerate(email_data, 2):
-        ws.cell(row=row, column=1, value=email)
-        # Extract domain
+    for row, data in enumerate(email_data, 2):
+        # data expected: (email, employment_type, work_location, experience_years, seniority, skills_str)
+        email = data[0]
         domain = email.split('@')[1] if '@' in email else ''
+        employment_type = data[1] if len(data) > 1 else ''
+        work_location = data[2] if len(data) > 2 else ''
+        experience_years = data[3] if len(data) > 3 else ''
+        seniority = data[4] if len(data) > 4 else ''
+        skills_str = data[5] if len(data) > 5 else ''
+        ws.cell(row=row, column=1, value=email)
         ws.cell(row=row, column=2, value=domain)
         ws.cell(row=row, column=3, value=employment_type)
         ws.cell(row=row, column=4, value=work_location)
-        ws.cell(row=row, column=5, value="Valid")
+        ws.cell(row=row, column=5, value=experience_years)
+        ws.cell(row=row, column=6, value=seniority)
+        ws.cell(row=row, column=7, value=skills_str)
+        ws.cell(row=row, column=8, value="Valid")
     
     # Auto-adjust column widths
     for column in ws.columns:
@@ -230,225 +194,39 @@ def create_zip_file(file_data):
 # Redirect root to /home
 @app.route('/')
 def root():
-    return redirect(url_for('home'))
-
-
-@app.route('/index')
-@login_required
-@track_hits
-def index():
     return render_template('index.html')
 
+
+# @app.route('/')
+# #@login_required
+# @track_hits
+# def index():
+#     return render_template('index.html')
+
 @app.route('/home')
-@track_hits
 def home():
     return render_template('home.html')
 
-@app.route('/login', methods=['GET', 'POST'])
-@track_hits
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        c = conn.cursor()
-        c.execute('SELECT * FROM users WHERE username = %s', (username,))
-        user = c.fetchone()
-        c.close()
-        conn.close()
-        if user and check_password_hash(user[2], password):
-            session['user_id'] = user[0]
-            session['username'] = user[1]
-            flash('Successfully logged in!', 'success')
-            next_page = request.args.get('next')
-            return redirect(next_page if next_page else url_for('index'))
-        flash('Invalid username or password', 'danger')
-    return render_template('login.html')
+# Auth routes removed
 
-@app.route('/register', methods=['GET', 'POST'])
-@track_hits
-def register():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        email = request.form.get('email')
-        if not all([username, password, email]):
-            flash('All fields are required', 'danger')
-            return render_template('register.html')
-        try:
-            conn = mysql.connector.connect(**MYSQL_CONFIG)
-            c = conn.cursor()
-            hashed_password = generate_password_hash(password)
-            c.execute('INSERT INTO users (username, password, email) VALUES (%s, %s, %s)',
-                      (username, hashed_password, email))
-            c.close()
-            conn.close()
-            flash('Registration successful! Please log in.', 'success')
-            return redirect(url_for('login'))
-        except mysql.connector.IntegrityError:
-            flash('Username or email already exists', 'danger')
-            return render_template('register.html')
-    return render_template('register.html')
+ 
 
 
-@app.route('/logout')
-def logout():
-    session.clear()
-    flash('You have been logged out', 'info')
-    return redirect(url_for('home'))
+ 
 
-# Add missing /profile route
-@app.route('/profile')
-@login_required
-def profile():
-    conn = mysql.connector.connect(**MYSQL_CONFIG)
-    c = conn.cursor()
-    c.execute('SELECT username, email, created_at FROM users WHERE id = %s', (session['user_id'],))
-    user = c.fetchone()
-    c.close()
-    conn.close()
-    return render_template('profile.html', user=user)
+ 
 
-@app.route('/profile/delete', methods=['POST'])
-@login_required
-def delete_account():
-    if request.form.get('confirm_delete') == 'yes':
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        c = conn.cursor()
-        c.execute('DELETE FROM users WHERE id = %s', (session['user_id'],))
-        c.close()
-        conn.close()
-        session.clear()
-        flash('Your account has been permanently deleted.', 'success')
-        return redirect(url_for('home'))
-    flash('Account deletion requires confirmation.', 'danger')
-    return redirect(url_for('profile'))
+ 
 
-@app.route('/reset-password', methods=['GET', 'POST'])
-def reset_password_request():
-    if request.method == 'POST':
-        email = request.form.get('email')
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        c = conn.cursor()
-        c.execute('SELECT id FROM users WHERE email = %s', (email,))
-        user = c.fetchone()
-        if user:
-            token = generate_reset_token()
-            expiry = datetime.now() + timedelta(hours=1)
-            c.execute('UPDATE users SET reset_token = %s, reset_token_expiry = %s WHERE email = %s',
-                      (token, expiry, email))
-            # Here you would typically send an email with the reset link
-            # For demonstration, we'll just flash the token
-            flash('Password reset link: {url_for(\"reset_password\", token=token, _external=True)}', 'info')
-        else:
-            flash('If an account exists with that email, a password reset link will be sent.', 'info')
-        c.close()
-        conn.close()
-        return redirect(url_for('login'))
-    return render_template('reset_password_request.html')
+ 
 
-@app.route('/reset-password/<token>', methods=['GET', 'POST'])
-def reset_password(token):
-    conn = mysql.connector.connect(**MYSQL_CONFIG)
-    c = conn.cursor()
-    c.execute('''SELECT id FROM users 
-                 WHERE reset_token = %s AND reset_token_expiry > %s''',
-              (token, datetime.now()))
-    user = c.fetchone()
-    if not user:
-        c.close()
-        conn.close()
-        flash('Invalid or expired reset token.', 'danger')
-        return redirect(url_for('reset_password_request'))
-    if request.method == 'POST':
-        password = request.form.get('password')
-        if password:
-            hashed_password = generate_password_hash(password)
-            c.execute('''UPDATE users 
-                        SET password = %s, reset_token = NULL, reset_token_expiry = NULL 
-                        WHERE reset_token = %s''',
-                     (hashed_password, token))
-            flash('Your password has been reset.', 'success')
-            c.close()
-            conn.close()
-            return redirect(url_for('login'))
-    c.close()
-    conn.close()
-    return render_template('reset_password.html')
+ 
 
-@app.route('/profile/update', methods=['POST'])
-@login_required
-def update_profile():
-    username = request.form.get('username')
-    email = request.form.get('email')
-    current_password = request.form.get('current_password')
-    new_password = request.form.get('new_password')
-    try:
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        c = conn.cursor()
-        if current_password:
-            # Verify current password
-            c.execute('SELECT password FROM users WHERE id = %s', (session['user_id'],))
-            stored_password = c.fetchone()[0]
-            if not check_password_hash(stored_password, current_password):
-                flash('Current password is incorrect.', 'danger')
-                c.close()
-                conn.close()
-                return redirect(url_for('profile'))
-            if new_password:
-                hashed_password = generate_password_hash(new_password)
-                c.execute('UPDATE users SET password = %s WHERE id = %s',
-                         (hashed_password, session['user_id']))
-        if username or email:
-            c.execute('UPDATE users SET username = %s, email = %s WHERE id = %s',
-                     (username, email, session['user_id']))
-            session['username'] = username
-        conn.commit()
-        flash('Profile updated successfully.', 'success')
-        c.close()
-        conn.close()
-    except mysql.connector.IntegrityError:
-        flash('Username or email already exists.', 'danger')
-    return redirect(url_for('profile'))
+ 
 
-@app.route('/stats')
-@login_required
-@track_hits
-def stats():
-    conn = mysql.connector.connect(**MYSQL_CONFIG)
-    c = conn.cursor()
-    # Get total hits
-    c.execute('SELECT COUNT(*) FROM hits')
-    total_hits = c.fetchone()[0]
-    # Get hits by country
-    c.execute('''SELECT country, COUNT(*) as count 
-                 FROM hits 
-                 GROUP BY country 
-                 ORDER BY count DESC 
-                 LIMIT 10''')
-    countries = c.fetchall()
-    # Get hits by endpoint
-    c.execute('''SELECT endpoint, COUNT(*) as count 
-                 FROM hits 
-                 GROUP BY endpoint 
-                 ORDER BY count DESC''')
-    endpoints = c.fetchall()
-    # Get recent hits
-    c.execute('''SELECT ip, country, city, timestamp, endpoint 
-                 FROM hits 
-                 ORDER BY timestamp DESC 
-                 LIMIT 10''')
-    recent_hits = c.fetchall()
-    c.close()
-    conn.close()
-    return render_template('stats.html', 
-                         total_hits=total_hits,
-                         countries=countries,
-                         endpoints=endpoints,
-                         recent_hits=recent_hits)
+# Stats page removed
 
 @app.route('/upload', methods=['POST'])
-@track_hits
 def upload_files():
     if 'files' not in request.files:
         return jsonify({'error': 'No files selected'}), 400
